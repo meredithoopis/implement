@@ -1,3 +1,4 @@
+from .fetch import *
 from .panda import *
 from .so100 import *
 from .ur_e import UR10e

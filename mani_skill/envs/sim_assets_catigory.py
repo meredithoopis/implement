@@ -121,6 +121,69 @@ ROBOTWIN_MODEL_IDS = {
     "120_plant": {"model_ids": [0], "default": 0},
 }
 
+ROBOTWIN_CATEGORIES = {
+    "food_and_beverage": {
+        "containers": ["001_bottle", "114_bottle", "021_cup", "022_cup-with-liquid", "039_mug",
+                       # "088_wineglass",
+                       "091_kettle"],  # Note: 009_kettle has no model_ids
+        "food_items": ["005_french-fries", "006_hamburg", "035_apple", "054_baguette", "069_vagetable", "075_bread",
+                       "103_fruit"],
+        "food_packages": ["025_chips-tub", "031_jam-jar", "038_milk-box", "064_msg", "068_boxdrink", "071_can",
+                          "101_milk-tea", "105_sauce-can", "112_tea-box", "113_coffee-box"],
+        "condiments": ["029_olive-oil", "065_soy-sauce", "066_vinegar"]
+    },
+    "kitchen_items": {
+        "dishes": ["002_bowl", "003_plate", "008_tray", "076_breadbasket"],
+        "utensils": ["033_fork", "034_knife"],
+        "cookware": ["067_steamer", "106_skillet", "053_teanet"],  # Note: 060_kitchenpot has no model_ids
+        "kitchen_tools": ["087_waterer"]
+    },
+    "furniture_storage": {
+        "furniture": ["014_bookcase", "040_rack"],  # Note: 036_cabinet has no model_ids
+        "containers": ["007_shoe-box", "042_wooden_box", "062_plasticbox", "110_basket", "019_coaster"],
+        # Note: 037_box has no model_ids
+        "trash_bins": ["011_dustbin", "063_tabletrashbin"]
+    },
+    "electronics": {
+        "computers": ["047_mouse", "116_keyboard"],  # Note: 015_laptop has no model_ids
+        "devices": ["017_calculator", "018_microphone", "024_scanner", "077_phone", "079_remotecontrol", "097_screen"],
+        "audio": ["055_small-speaker", "098_speaker"],
+        "appliances": ["072_electronicscale", "099_fan"]  # Note: 016_oven and 044_microwave have no model_ids
+    },
+    "tools": {
+        "hand_tools": ["020_hammer", "032_screwdriver", "082_smallshovel", "084_woodenmallet"],
+        "power_tools": ["030_drill"],
+        "other_tools": ["102_roller"]  # Note: 056_switch has no model_ids
+    },
+    "stationery": {
+        "writing": ["058_markpen", "093_brush-pen", "083_brush"],  # Note: 010_pen has no model_ids
+        "office_supplies": ["048_stapler", "092_notebook", "095_glue", "117_whiteboard-eraser", "119_mini-chalkboard"],
+        "containers": ["059_pencup"],
+        "other": ["043_book", "104_board"]
+    },
+    "personal_care": {
+        "hygiene": ["049_shampoo", "107_soap", "118_tooth-paste", "096_cleaner", "109_hydrating-oil"],
+        "accessories": ["115_perfume"],
+        "health": ["080_pillbottle"]
+    },
+    "sports_toys": {
+        "sports": ["027_table-tennis"],
+        "toys": ["057_toycar", "073_rubikscube", "081_playingcards"],
+        "fitness": ["052_dumbbell", "013_dumbbell-rack"]
+    },
+    "home_accessories": {
+        "decorative": ["012_plant-pot", "120_plant", "051_candlestick", "089_globe", "090_trophy", "085_gong"],
+        "functional": ["045_sand-clock", "046_alarm-clock", "050_bell", "111_callbell", "074_displaystand",
+                       "078_phonestand", "094_rest"],
+        "other": ["023_tissue-box", "028_roll-paper", "026_pet-collar", "070_paymentsign", "100_seal"]
+    },
+    "miscellaneous": {
+        "blocks": ["004_fluted-block", "086_woodenblock", "108_block"],
+        "footwear": ["041_shoe"],
+        "electronics_accessories": ["061_battery"]
+    }
+}
+
 PARTNET_OBJECTS = {
     "Bottle": ["3380", "3398", "3517", "3519", "3520", "3558", "3571", "3574", "3593", "3596", "3614", "3615", "3616", "3618", "3625", "3635", "3655", "3678", "3763", "3822", "3830", "3854", "3868", "3933", "3934", "3944", "3990", "4043", "4064", "4084", "4118", "4200", "4204", "4216", "4233", "4314", "4393", "4403", "4427", "4500", "4514", "5601", "5688", "5850", "5861", "5902", "6037", "6040", "6209", "6222", "6263", "6335", "6430", "6493", "6771", "8736", "8848"],
     "Box": ["47645", "48492", "100129", "100141", "100154", "100162", "100174", "100189", "100191", "100194", "100197", "100202", "100214", "100221", "100224", "100234", "100243", "100247", "100426", "100658", "100664", "100671", "100676", "100685", "102373", "102377", "102379", "102456"],

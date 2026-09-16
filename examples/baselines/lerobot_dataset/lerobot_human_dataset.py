@@ -357,10 +357,10 @@ class HumanVideoDataset(Dataset):
 
         # Load datasets based on configuration
         if config.dataset_file and os.path.exists(config.dataset_file):
-            print(f"�� Loading datasets from config: {config.dataset_file}")
+            print(f"Loading datasets from config: {config.dataset_file}")
             self._load_from_config()
         else:
-            print(f"�� Scanning for human demo repos in: {config.root}")
+            print(f"Scanning for human demo repos in: {config.root}")
             self._discover_repos()
 
         if not self.all_tasks:
@@ -601,7 +601,7 @@ class HumanVideoDataset(Dataset):
                         jobs.append(key)
 
         print(
-            f"🔄 Pre-decoding {len(jobs)} unique (task, episode, camera) jobs "
+            f"Pre-decoding {len(jobs)} unique (task, episode, camera) jobs "
             f"with {self.config.pre_decode_num_workers} workers …"
         )
 
@@ -616,7 +616,7 @@ class HumanVideoDataset(Dataset):
                 if ok:
                     success += 1
 
-        print(f"✓ Pre-decode complete: {success}/{len(jobs)} episodes cached")
+        print(f"Pre-decode complete: {success}/{len(jobs)} episodes cached")
 
     # ------------------------------------------------------------------
     # Existing methods (unchanged)
