@@ -149,8 +149,12 @@ class LeRobotSimDataConfig:
 
     enable_augmentation: bool = True
 
+    # Pre-decoded RGB frames (examples/baselines/act/c15_diag/build_frame_cache.py).
+    # When set, camera frames are read from uint8 memmaps instead of decoding video.
+    frame_cache_dir: Optional[str] = None
+
     # For *Skill Model Training
-    skill: bool = False 
+    skill: bool = False
     xskill: bool = False
     robot_frame_gap: int = 35
 
@@ -247,6 +251,28 @@ class LeRobotSimDataset(Dataset):
                 print(f'removing columns {cols_to_remove}')
                 sub_ds.hf_dataset = sub_ds.hf_dataset.remove_columns(cols_to_remove)
 
+        # Pre-decoded frames: register memmaps and drop the camera from meta so the
+        # LeRobotDataset no longer decodes that video stream.
+        self._frame_cache_spec = {}   # (dataset_idx, video_key) -> (path, shape)
+        self._frame_mm = {}           # opened lazily, per worker process
+        if config.frame_cache_dir:
+            if config.include_depth or config.skill:
+                raise ValueError("frame_cache_dir only covers RGB obs frames (include_depth=False, skill=False)")
+            for ds_idx, sub_ds in enumerate(sub_datasets):
+                for cam in self.cameras:
+                    key = f"observation.images.{cam}"
+                    spec_path = Path(config.frame_cache_dir) / sub_ds.repo_id / f"{key}.json"
+                    if not spec_path.exists():
+                        raise FileNotFoundError(f"no frame cache for {sub_ds.repo_id}/{key}: {spec_path}")
+                    spec = json.loads(spec_path.read_text())
+                    if spec["shape"][0] != sub_ds.meta.total_frames:
+                        raise ValueError(f"stale frame cache {spec_path}: {spec['shape'][0]} frames, "
+                                         f"dataset has {sub_ds.meta.total_frames}")
+                    self._frame_cache_spec[(ds_idx, key)] = (str(spec_path.with_suffix(".u8")), tuple(spec["shape"]))
+                    sub_ds.meta.features.pop(key, None)
+            print(f"using pre-decoded frames from {config.frame_cache_dir} "
+                  f"({len(self._frame_cache_spec)} streams)")
+
         self.lerobot_dataset = ConcatDataset(sub_datasets)
         self.main_dataset = sub_datasets[0]  # For dimensions and stats fallback
 
@@ -303,6 +329,21 @@ class LeRobotSimDataset(Dataset):
 
     def __len__(self) -> int:
         return self.target_length
+
+    def __getstate__(self):
+        # never pickle opened memmaps into DataLoader workers; each worker reopens them
+        state = self.__dict__.copy()
+        state["_frame_mm"] = {}
+        return state
+
+    def _cached_frame(self, dataset_idx: int, key: str, frame_index: int) -> np.ndarray:
+        """uint8 HWC frame, bit-identical to the decode path (float32 /255 *255, truncated)."""
+        mm = self._frame_mm.get((dataset_idx, key))
+        if mm is None:
+            path, shape = self._frame_cache_spec[(dataset_idx, key)]
+            mm = np.memmap(path, dtype=np.uint8, mode="r", shape=shape)
+            self._frame_mm[(dataset_idx, key)] = mm
+        return ((mm[frame_index].astype(np.float32) / 255.0) * 255).astype(np.uint8)
 
     def _setup_transforms_sim(self, config):
         """Call this inside LeRobotSimDataset.__init__ instead of old transform setup."""
@@ -434,15 +475,19 @@ class LeRobotSimDataset(Dataset):
         for cam_name in self.cameras:
             rgb_key = f"observation.images.{cam_name}"
             depth_key = f"observation.images.{cam_name}_depth"
-            if rgb_key not in frames[-1]:
+            cached = (dataset_idx, rgb_key) in self._frame_cache_spec
+            if not cached and rgb_key not in frames[-1]:
                 continue
 
             per_frame_views = []
             for frame in frames:
-                rgb_tensor = frame[rgb_key]
-                if rgb_tensor.dim() == 4:
-                    rgb_tensor = rgb_tensor[0]
-                rgb_img = (rgb_tensor.permute(1, 2, 0).numpy() * 255).astype(np.uint8)
+                if cached:
+                    rgb_img = self._cached_frame(dataset_idx, rgb_key, int(frame["index"]))
+                else:
+                    rgb_tensor = frame[rgb_key]
+                    if rgb_tensor.dim() == 4:
+                        rgb_tensor = rgb_tensor[0]
+                    rgb_img = (rgb_tensor.permute(1, 2, 0).numpy() * 255).astype(np.uint8)
 
                 depth_img = None
                 if self.config.include_depth and depth_key in frame:

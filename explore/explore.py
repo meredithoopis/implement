@@ -4,6 +4,7 @@
   python explore/explore.py variety   # within task x level scene variety + first-frame leakage test
   python explore/explore.py masks     # mask label quality + 2.5D object trajectories (mask + depth)
   python explore/explore.py grippers  # left/right gripper command vs state on real data
+  python explore/explore.py episode --tasks H20 --ep 0   # full-length mp4s of one episode, every folder
 
 Every command works on whatever has been downloaded; missing folders/videos are skipped.
 """
@@ -13,6 +14,7 @@ import re
 import textwrap
 from pathlib import Path
 
+import av
 import matplotlib
 
 matplotlib.use("Agg")
@@ -314,9 +316,114 @@ def cmd_grippers(args, out):
     print(s.to_string(index=False))
 
 
+# --------------------------------------------------------------------------------------------- episode
+TILE = (320, 240)  # w, h of one camera tile
+PALETTE = (plt.get_cmap("tab10")(np.arange(10))[:, :3] * 255).astype(np.uint8)
+
+
+def cmd_episode(args, out):
+    """Per folder: one mp4 with every downloaded stream (rows rgb / depth / mask, columns cameras),
+    plus overview.mp4 with the main camera of every folder side by side. Episode i of each folder is
+    just its i-th episode: human and robot episodes are not paired."""
+    from PIL import Image, ImageDraw
+
+    descs = load_descs()
+    for hid in args.tasks:
+        d = out / f"episode_{hid}_{TASKS[hid][0]}_ep{args.ep}"
+        d.mkdir(parents=True, exist_ok=True)
+        overview, notes = [], []
+        for _, domain, level, f in open_folders(args, [hid]):
+            ep = f.episodes.index[min(args.ep, len(f.episodes) - 1)]
+            keys = [k for k, v in f.info["features"].items() if v.get("dtype") == "video" and f.has_video(k)]
+            if not keys:
+                continue
+            n = int(f.episodes.loc[ep, "length"])
+            cams = sorted({k.split(".")[-1].replace("_depth", "").replace("_mask", "") for k in keys})
+            kinds = [s for s in ("", "_depth", "_mask") if any(k.endswith(c + s) for k in keys for c in cams)]
+            tiles = {k: decode_tiles(f, k, ep, n) for k in keys}
+            grips = gripper_text(f, ep) if f.has(STATE_KEY) else [""] * n
+            text = descs.get(desc_key(domain, level, hid), [""])[0]
+            name = f"{domain}_{level}".replace("-", "base")
+            notes.append(f"## {name}  (episode {ep}, {n} frames, {n / f.fps:.1f}s)\n{text}\n")
+            frames = []
+            for t in range(n):
+                canvas = Image.new("RGB", (TILE[0] * len(cams), TILE[1] * len(kinds) + 40))
+                for r, kind in enumerate(kinds):
+                    for c, cam in enumerate(cams):
+                        k = f"observation.images.{cam}{kind}"
+                        if k in tiles:
+                            canvas.paste(Image.fromarray(tiles[k][t]), (c * TILE[0], 40 + r * TILE[1]))
+                            ImageDraw.Draw(canvas).text((c * TILE[0] + 4, 44 + r * TILE[1]), cam + kind, fill="yellow")
+                draw = ImageDraw.Draw(canvas)
+                draw.text((4, 2), f"{TASKS[hid][0]} {domain} {level}  ep{ep}  frame {t}/{n - 1}  {grips[t]}", fill="white")
+                draw.text((4, 20), text.split(";")[0][:150], fill="gray")
+                frames.append(np.asarray(canvas))
+            write_mp4(frames, d / f"{name}.mp4", f.fps)
+            main = next((k for k in VIEW_KEYS if k in tiles), keys[0])
+            overview.append((f"{domain} {level} ({n / f.fps:.0f}s)", tiles[main], f.fps))
+        if overview:
+            write_overview(overview, d / "overview.mp4")
+        (d / "annotations.md").write_text("\n".join(notes), encoding="utf-8")
+        print("  wrote", d)
+
+
+def decode_tiles(f, key, ep, n, chunk=64):
+    """All frames of one stream, letterboxed to TILE; masks are colourised."""
+    from PIL import Image
+
+    out = []
+    for s in range(0, n, chunk):  # chunked so full-res 720p frames never pile up in memory
+        for img in f.frames(key, ep, list(range(s, min(s + chunk, n)))):
+            if key.endswith("_mask"):
+                ids = img[..., 0]
+                img = np.where(ids[..., None] > 0, PALETTE[ids % 10], 0).astype(np.uint8)
+            im = Image.fromarray(img)
+            im.thumbnail(TILE, Image.NEAREST if key.endswith("_mask") else Image.BILINEAR)
+            tile = Image.new("RGB", TILE)
+            tile.paste(im, ((TILE[0] - im.width) // 2, (TILE[1] - im.height) // 2))
+            out.append(np.asarray(tile))
+    return out + [out[-1]] * (n - len(out))  # guard against a short decode at the file end
+
+
+def gripper_text(f, ep):
+    s = f.series(STATE_KEY, ep)
+    r, l = side_idx(f, "right")[STATE_KEY][1][0], side_idx(f, "left")[STATE_KEY][1][0]
+    return [f"grip state R={row[r]:.2f} L={row[l]:.2f}" for row in s]
+
+
+def write_overview(items, path, cols=3):
+    """Main camera of every folder in a grid, each at its own speed, holding its last frame."""
+    from PIL import Image, ImageDraw
+
+    rows = int(np.ceil(len(items) / cols))
+    fps = items[0][2]
+    n = max(len(tiles) for _, tiles, _ in items)
+    frames = []
+    for t in range(n):
+        canvas = Image.new("RGB", (TILE[0] * cols, TILE[1] * rows))
+        for i, (label, tiles, _) in enumerate(items):
+            x, y = (i % cols) * TILE[0], (i // cols) * TILE[1]
+            canvas.paste(Image.fromarray(tiles[min(t, len(tiles) - 1)]), (x, y))
+            ImageDraw.Draw(canvas).text((x + 4, y + 4), label + (" (done)" if t >= len(tiles) else ""), fill="yellow")
+        frames.append(np.asarray(canvas))
+    write_mp4(frames, path, fps)
+
+
+def write_mp4(frames, path, fps):
+    with av.open(str(path), "w") as c:
+        s = c.add_stream("libx264", rate=int(round(fps)))
+        s.height, s.width = frames[0].shape[0] // 2 * 2, frames[0].shape[1] // 2 * 2
+        s.pix_fmt = "yuv420p"
+        s.options = {"crf": "23", "preset": "veryfast"}
+        for fr in frames:
+            c.mux(s.encode(av.VideoFrame.from_ndarray(np.ascontiguousarray(fr[: s.height, : s.width]), format="rgb24")))
+        c.mux(s.encode())
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["levels", "variety", "masks", "grippers"])
+    ap.add_argument("cmd", choices=["levels", "variety", "masks", "grippers", "episode"])
+    ap.add_argument("--ep", type=int, default=0, help="episode: index within each folder")
     ap.add_argument("--root", default="demos/ig10k")
     ap.add_argument("--out", default="explore_out")
     ap.add_argument("--tasks", nargs="+", default=list(TASKS), choices=list(TASKS))
@@ -327,4 +434,5 @@ if __name__ == "__main__":
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    {"levels": cmd_levels, "variety": cmd_variety, "masks": cmd_masks, "grippers": cmd_grippers}[args.cmd](args, out)
+    {"levels": cmd_levels, "variety": cmd_variety, "masks": cmd_masks, "grippers": cmd_grippers,
+     "episode": cmd_episode}[args.cmd](args, out)

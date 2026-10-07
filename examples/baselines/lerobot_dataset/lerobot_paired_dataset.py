@@ -94,6 +94,9 @@ class PairedDatasetConfig:
     pre_decode_cache_dir: str = "tmp/human_video_cache"
     pre_decode_num_workers: int = 16
 
+    # Pre-decoded sim RGB frames (examples/baselines/act/c15_diag/build_frame_cache.py)
+    sim_frame_cache_dir: Optional[str] = None
+
     # For Skill Model Training
     skill: bool = False
     xskill: bool = False
@@ -339,6 +342,7 @@ class HumanSimPairedDataset(Dataset):
             video_backend=config.video_backend,
             debug=config.debug,
             enable_augmentation=config.enable_augmentation,
+            sim_frame_cache_dir=config.sim_frame_cache_dir,
             skill=config.skill,
             xskill=config.xskill,
             robot_frame_gap=config.robot_frame_gap,

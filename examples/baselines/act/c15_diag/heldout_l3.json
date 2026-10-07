@@ -1,0 +1,30 @@
+{
+  "_about": "Held-out L3 substitutes for eval_diag --l3-variant. Every asset here is used by no C15 task file at any level (checked against mani_skill/envs/tasks/tabletop/object_gallery_catalog.json). attrs are set on the L3 env before reset; reset reconfigures the scene. Check each one visually first: python -m examples.baselines.act.c15_diag.env_sanity --render-variant <name>",
+  "StirSpoon_markpen": {
+    "task": "StirSpoon",
+    "replaces": "stirring tool 086_woodenblock id 1 (stretched block) -> 058_markpen id 0 at its native size",
+    "attrs": {"tool_modelname": "058_markpen", "tool_model_id": 0, "tool_scale": [1.0, 1.0, 1.0],
+              "tool_replace_scale": false, "bowl_modelname": "002_bowl", "bowl_model_id": 5},
+    "note": "bowl pinned to the training-scene bowl, so only the tool differs from the L3 training scene. Compare with original at --l3-flag off."
+  },
+  "StirSpoon_screwdriver": {
+    "task": "StirSpoon",
+    "replaces": "stirring tool 086_woodenblock -> 032_screwdriver id 0 (a C30 task asset, never seen by a C15 model)",
+    "attrs": {"tool_modelname": "032_screwdriver", "tool_model_id": 0, "tool_scale": [1.0, 1.0, 1.0],
+              "tool_replace_scale": false, "bowl_modelname": "002_bowl", "bowl_model_id": 5},
+    "note": "backup if the marker does not sit in the mug."
+  },
+  "PlaceMugRack_coaster": {
+    "task": "PlaceMugRack",
+    "replaces": "mug target 003_plate id 0 -> 019_coaster id 0 at its native size",
+    "attrs": {"rack_modelname": "019_coaster", "rack_model_id": 0, "rack_scale": [1.0, 1.0, 1.0],
+              "rack_replace_scale": false},
+    "note": "L3 success is mug-to-target distance <= 0.1, unchanged."
+  },
+  "PlaceFileFolder_basket": {
+    "task": "PlaceFileFolder",
+    "replaces": "notebook target 008_tray id 3 -> 110_basket id 0",
+    "attrs": {"tray_modelname": "110_basket", "tray_model_id": 0},
+    "note": "the task code hard-codes this target's scale (0.2, replace_scale=True); check the render before trusting results."
+  }
+}

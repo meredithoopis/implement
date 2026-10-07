@@ -184,6 +184,14 @@ class TrainingArgs:
     # ── Checkpointing ─────────────────────────────────────────────────────────
     resume_from:        Optional[str] = None
     reset_lr_scheduler: bool = False
+    # Weights-only init for fine-tuning (P+FT): fresh optimizer, LR schedule and epoch count.
+    # (resume_from restores the finished schedule and epoch, so it cannot be used to fine-tune.)
+    init_from:          Optional[str] = None
+
+    # ── Throughput ────────────────────────────────────────────────────────────
+    sim_frame_cache_dir: Optional[str]   = None   # pre-decoded sim frames (c15_diag/build_frame_cache.py)
+    max_train_minutes:   Optional[float] = None   # stop early (throughput check); no checkpoint is saved
+    throughput_log_freq: int             = 100    # iters between steps/s + data-wait reports
 
 
 # ============================================================================
@@ -782,6 +790,7 @@ def train():
         video_backend=args.video_backend,
         input_mode=args.input_mode,
         include_first_frame=args.include_first_frame,
+        sim_frame_cache_dir=args.sim_frame_cache_dir,
     )
     if args.data_source == "robot":
         from examples.baselines.lerobot_dataset.lerobot_paired_dataset import (
@@ -858,6 +867,13 @@ def train():
 
     # ── Agent ─────────────────────────────────────────────────────────────────
     agent = ACTAgent(args, device, dataloader=dataloader)
+    if args.init_from:
+        init_sd = torch.load(args.init_from, map_location="cpu", weights_only=False)["agent_state_dict"]
+        missing, _ = agent.load_state_dict(init_sd, strict=False)
+        missing = [k for k in missing if "._backbone." not in k]  # frozen DINOv2 weights are not saved
+        if missing:
+            raise RuntimeError(f"--init-from: {len(missing)} policy weights missing, e.g. {missing[:5]}")
+        print(f"  Initialised policy weights from {args.init_from} (fresh optimizer / LR schedule)")
 
     # Recreate DataLoader if skip_human_video was activated
     if args.num_dataload_workers > 0 and dataset.skip_human_video:
@@ -905,13 +921,22 @@ def train():
     # ── Training loop ─────────────────────────────────────────────────────────
     if args.use_epoch_training:
         global_step = start_epoch * num_batches_per_epoch
+        # Throughput: time blocked on the DataLoader vs. time in the step. The step
+        # ends with loss.item() (a GPU sync), so step time includes GPU work.
+        train_t0  = time.perf_counter()
+        win_wait  = win_step = 0.0
+        win_iters = 0
+        stop_early = False
 
         for epoch in tqdm(range(start_epoch, args.total_epochs), desc="Epochs"):
 
             epoch_loss  = 0.0
             num_batches = 0
+            ep_wait = ep_step = 0.0
+            t_prev = time.perf_counter()
 
             for batch in tqdm(dataloader, desc=f"Epoch {epoch}", leave=False):
+                t_got = time.perf_counter()
                 with torch.autocast("cuda", dtype=_amp_dtype, enabled=_use_amp):
                     loss_dict = agent.compute_loss(batch)
 
@@ -937,6 +962,29 @@ def train():
                 global_step += 1
                 iteration   += 1
 
+                t_done = time.perf_counter()
+                # the run's first batch includes DataLoader worker start-up; don't count it
+                wait = 0.0 if iteration == start_iteration + 1 else t_got - t_prev
+                win_wait += wait
+                win_step += t_done - t_got
+                ep_wait  += wait
+                ep_step  += t_done - t_got
+                win_iters += 1
+                t_prev = t_done
+                if win_iters >= args.throughput_log_freq:
+                    span = win_wait + win_step
+                    sps, wait_frac = win_iters / span, win_wait / span
+                    print(f"[throughput] iter {iteration}: {sps:.2f} steps/s, "
+                          f"{sps * args.batch_size:.0f} samples/s, data-wait {wait_frac:.1%}")
+                    writer.add_scalar("perf/steps_per_s", sps, iteration)
+                    writer.add_scalar("perf/samples_per_s", sps * args.batch_size, iteration)
+                    writer.add_scalar("perf/data_wait_frac", wait_frac, iteration)
+                    win_wait = win_step = 0.0
+                    win_iters = 0
+                if args.max_train_minutes and t_done - train_t0 > 60 * args.max_train_minutes:
+                    stop_early = True
+                    break
+
                 if iteration % args.log_freq == 0:
                     cs = agent.task_encoder.cache_stats(batch.get("human_repo_id"))
                     writer.add_scalar("train/loss", total_loss.item(), iteration)
@@ -952,6 +1000,18 @@ def train():
                                   step=global_step)
 
             avg_loss = epoch_loss / max(num_batches, 1)
+            ep_time = ep_wait + ep_step
+            print(f"[throughput] epoch {epoch}: {num_batches} steps in {ep_time / 60:.1f} min, "
+                  f"data-wait {ep_wait / max(ep_time, 1e-9):.1%}")
+            if stop_early:
+                elapsed = (time.perf_counter() - train_t0) / 60
+                print(f"\n[throughput] stopped after {elapsed:.1f} min (--max-train-minutes), "
+                      f"{iteration - start_iteration} steps; no checkpoint saved.")
+                print(f"[throughput] projected epoch time: "
+                      f"{ep_time / max(num_batches, 1) * num_batches_per_epoch / 60:.1f} min "
+                      f"({num_batches_per_epoch} steps/epoch)")
+                writer.close()
+                return
             if epoch % args.log_epoch_freq == 0:
                 writer.add_scalar("train_epoch/loss", avg_loss, epoch)
                 writer.add_scalar("train_epoch/lr",   optimizer.param_groups[0]["lr"], epoch)

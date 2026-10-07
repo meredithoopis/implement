@@ -58,6 +58,9 @@ class LeRobotDataConfig:
     pre_decode_cache_dir: str = "tmp/human_video_cache"
     pre_decode_num_workers: int = 4
 
+    # Sim only: pre-decoded RGB frames (see LeRobotSimDataConfig.frame_cache_dir)
+    sim_frame_cache_dir: Optional[str] = None
+
     # For Skill Model Training
     skill: bool = False
     xskill: bool = False
@@ -110,6 +113,7 @@ def build_lerobot_dataset(config: LeRobotDataConfig):
             depth_mode=config.depth_mode,
             debug=config.debug,
             enable_augmentation=config.enable_augmentation,
+            frame_cache_dir=config.sim_frame_cache_dir,
             skill=config.skill,
             xskill=config.xskill,
             robot_frame_gap=config.robot_frame_gap,
